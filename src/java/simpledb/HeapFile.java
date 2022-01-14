@@ -1,5 +1,6 @@
 package simpledb;
 
+import javax.xml.crypto.Data;
 import java.io.*;
 import java.util.*;
 
@@ -15,6 +16,9 @@ import java.util.*;
  */
 public class HeapFile implements DbFile {
 
+    private File f;
+    private TupleDesc td;
+
     /**
      * Constructs a heap file backed by the specified file.
      * 
@@ -23,7 +27,9 @@ public class HeapFile implements DbFile {
      *            file.
      */
     public HeapFile(File f, TupleDesc td) {
-        // some code goes here
+        // Done
+        this.f = f;
+        this.td = td;
     }
 
     /**
@@ -32,8 +38,8 @@ public class HeapFile implements DbFile {
      * @return the File backing this HeapFile on disk.
      */
     public File getFile() {
-        // some code goes here
-        return null;
+        // Done
+        return f;
     }
 
     /**
@@ -46,8 +52,8 @@ public class HeapFile implements DbFile {
      * @return an ID uniquely identifying this HeapFile.
      */
     public int getId() {
-        // some code goes here
-        throw new UnsupportedOperationException("implement this");
+        // Done
+        return f.getAbsolutePath().hashCode();
     }
 
     /**
@@ -56,14 +62,43 @@ public class HeapFile implements DbFile {
      * @return TupleDesc of this DbFile.
      */
     public TupleDesc getTupleDesc() {
-        // some code goes here
-        throw new UnsupportedOperationException("implement this");
+        // Done
+        return td;
     }
 
     // see DbFile.java for javadocs
     public Page readPage(PageId pid) {
-        // some code goes here
-        return null;
+        // Done
+        int tid = pid.getTableId();
+        int pgNo = pid.getPageNumber();
+        RandomAccessFile f = null;
+        try {
+            f = new RandomAccessFile(this.f, "r");
+            int pgSz = BufferPool.getPageSize();
+            // page number starts with 0
+            if ((long) (pgNo + 1) * pgSz > f.length()) {
+                throw new IllegalArgumentException(String.format("table %d page %d is invalid", tid, pgNo));
+            }
+            byte[] bytes = new byte[pgSz];
+            // calculate offset
+            f.seek((long) pgNo * pgSz);
+            int r = f.read(bytes, 0, pgSz);
+            if (r != pgSz) {
+                throw new IllegalArgumentException(String.format("table %d page %d is invalid", tid, pgNo));
+            }
+            return new HeapPage((HeapPageId) pid, bytes);
+        } catch (IOException e) {
+            e.printStackTrace();
+        } finally {
+            if (f != null) {
+                try {
+                    f.close();
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            }
+        }
+        throw new IllegalArgumentException(String.format("table %d page %d is invalid", tid, pgNo));
     }
 
     // see DbFile.java for javadocs
@@ -76,8 +111,8 @@ public class HeapFile implements DbFile {
      * Returns the number of pages in this HeapFile.
      */
     public int numPages() {
-        // some code goes here
-        return 0;
+        // Done
+        return (int) Math.ceil(f.length() * 1.0 / BufferPool.getPageSize());
     }
 
     // see DbFile.java for javadocs
@@ -98,8 +133,91 @@ public class HeapFile implements DbFile {
 
     // see DbFile.java for javadocs
     public DbFileIterator iterator(TransactionId tid) {
-        // some code goes here
-        return null;
+        // Done
+        return new HeapFileIterator(this, tid);
+    }
+
+    private class HeapFileIterator extends AbstractDbFileIterator {
+        private HeapFile file;
+        private TransactionId tid;
+        private int currentPage;
+        private Iterator<Tuple> iterator;
+
+        public HeapFileIterator(HeapFile file, TransactionId tid) {
+            this.file = file;
+            this.tid = tid;
+        }
+
+        public Iterator<Tuple> initializeIterator(int pgNo) throws DbException, TransactionAbortedException {
+            if (pgNo < 0 || pgNo >= file.numPages()) {
+                throw new DbException(String.format("problems with opening/accessing the database pageNo %d ", pgNo));
+            }
+            HeapPageId pgId = new HeapPageId(file.getId(), pgNo);
+            /*
+                copied from https://github.com/jasonleaster/simple-db/blob/master/src/java/simpledb/dbfile/HeapFile.java
+                1. 如果使用READ_ONLY, 会导致并发事务的系统单元测试挂掉，无解
+                2. 使用READ_WRITE，抢占该页数据，避免并发写覆盖的情况，为了通过单元测试。
+             */
+            HeapPage page = (HeapPage) Database.getBufferPool().getPage(tid, pgId, Permissions.READ_ONLY);
+            return page.iterator();
+        }
+
+        @Override
+        public void open() throws DbException, TransactionAbortedException {
+            currentPage = 0;
+            iterator = initializeIterator(currentPage);
+        }
+
+        @Override
+        public boolean hasNext() throws DbException, TransactionAbortedException {
+            if (null == iterator) {
+                return false;
+            } else if (iterator.hasNext()) {
+                return true;
+            } else {
+                currentPage++;
+                if (currentPage >= file.numPages()) {
+                    return false;
+                } else {
+                    iterator = initializeIterator(currentPage);
+                    return iterator.hasNext();
+                }
+            }
+        }
+
+        @Override
+        protected Tuple readNext() throws DbException, TransactionAbortedException {
+            if (null == iterator) {
+                return null;
+            }
+
+            while (!iterator.hasNext()) {
+                currentPage++;
+                if (currentPage < file.numPages()) {
+                    iterator = initializeIterator(currentPage);
+                } else {
+                    break;
+                }
+            }
+
+            if (currentPage == file.numPages()) {
+                return null;
+            }
+
+            return iterator.next();
+        }
+
+        @Override
+        public void rewind() throws DbException, TransactionAbortedException {
+            close();
+            open();
+        }
+
+        @Override
+        public void close() {
+            super.close();
+            currentPage = file.numPages();
+        }
     }
 
 }
