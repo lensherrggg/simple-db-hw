@@ -71,7 +71,7 @@ public class BufferPool {
      */
     public  Page getPage(TransactionId tid, PageId pid, Permissions perm)
         throws TransactionAbortedException, DbException {
-        // evict one page after lab1
+        // TODO: evict one page after lab1
         int key = pid.hashCode();
         if (!buffer.containsKey(key)) {
             DbFile dbFile = Database.getCatalog().getDatabaseFile(pid.getTableId());
