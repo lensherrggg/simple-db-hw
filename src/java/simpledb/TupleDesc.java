@@ -43,8 +43,22 @@ public class TupleDesc implements Serializable {
      *        that are included in this TupleDesc
      * */
     public Iterator<TDItem> iterator() {
-        // some code goes here
-        return null;
+        // Done
+        return new Iterator<TDItem>() {
+            private int curr = -1;
+            @Override
+            public boolean hasNext() {
+                return curr + 1 < tdItems.length;
+            }
+
+            @Override
+            public TDItem next() {
+                if (hasNext()) {
+                    return tdItems[curr++];
+                }
+                throw new NoSuchElementException();
+            }
+        };
     }
 
     private static final long serialVersionUID = 1L;
