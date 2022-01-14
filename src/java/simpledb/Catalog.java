@@ -45,8 +45,8 @@ public class Catalog {
      */
     public Catalog() {
         // Done
-        tableMap = new HashMap<>();
-        name2Id = new HashMap<>();
+        tableMap = new ConcurrentHashMap<>();
+        name2Id = new ConcurrentHashMap<>();
     }
 
     /**
@@ -92,6 +92,9 @@ public class Catalog {
      */
     public int getTableId(String name) throws NoSuchElementException {
         // Done
+        if (null == name) {
+            throw new NoSuchElementException("Should not find table with null name");
+        }
         if (!name2Id.containsKey(name)) {
             throw new NoSuchElementException("No such table name");
         }
