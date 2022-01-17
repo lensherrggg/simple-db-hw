@@ -2,6 +2,9 @@ package simpledb;
 
 import java.io.*;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Random;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -144,8 +147,9 @@ public class BufferPool {
      */
     public void insertTuple(TransactionId tid, int tableId, Tuple t)
         throws DbException, IOException, TransactionAbortedException {
-        // some code goes here
-        // not necessary for lab1
+        // Done
+        ArrayList<Page> pages = Database.getCatalog().getDatabaseFile(t.getRecordId().getPageId().getTableId()).insertTuple(tid, t);
+        updateBufferPool(tid, pages);
     }
 
     /**
@@ -163,8 +167,32 @@ public class BufferPool {
      */
     public  void deleteTuple(TransactionId tid, Tuple t)
         throws DbException, IOException, TransactionAbortedException {
-        // some code goes here
-        // not necessary for lab1
+        // Done
+        ArrayList<Page> pages = Database.getCatalog().getDatabaseFile(t.getRecordId().getPageId().getTableId()).deleteTuple(tid, t);
+        updateBufferPool(tid, pages);
+    }
+
+    /**
+     * Mark page dirty and put it into buffer pool
+     * @param tid the transaction that updates pages
+     * @param pages updated pages
+     */
+    public void updateBufferPool(TransactionId tid, List<Page> pages) {
+        for (Page p : pages) {
+            // mark dirty
+            p.markDirty(true, tid);
+            // evict pages
+//            int key = p.getId().hashCode();
+//            if (!this.buffer.containsKey(key)) {
+//                while (this.buffer.size() >= numPages) {
+//                    try {
+//                        evictPage();
+//                    } catch (DbException e) {
+//                        e.printStackTrace();
+//                    }
+//                }
+//            }
+        }
     }
 
     /**
@@ -173,9 +201,10 @@ public class BufferPool {
      *     break simpledb if running in NO STEAL mode.
      */
     public synchronized void flushAllPages() throws IOException {
-        // some code goes here
-        // not necessary for lab1
-
+        // Done
+        for (Page p : buffer.values()) {
+            flushPage(p.getId());
+        }
     }
 
     /** Remove the specific page id from the buffer pool.
@@ -187,8 +216,8 @@ public class BufferPool {
         are removed from the cache so they can be reused safely
     */
     public synchronized void discardPage(PageId pid) {
-        // some code goes here
-        // not necessary for lab1
+        // Done
+        buffer.remove(pid.hashCode());
     }
 
     /**
@@ -196,8 +225,13 @@ public class BufferPool {
      * @param pid an ID indicating the page to flush
      */
     private synchronized  void flushPage(PageId pid) throws IOException {
-        // some code goes here
-        // not necessary for lab1
+        // Done
+        Page p = buffer.get(pid.hashCode());
+        if (null != p.isDirty()) {
+            DbFile dbFile = Database.getCatalog().getDatabaseFile(p.getId().getTableId());
+            dbFile.writePage(p);
+            p.markDirty(false, null);
+        }
     }
 
     /** Write all pages of the specified transaction to disk.
@@ -212,8 +246,17 @@ public class BufferPool {
      * Flushes the page to disk to ensure dirty pages are updated on disk.
      */
     private synchronized  void evictPage() throws DbException {
-        // some code goes here
-        // not necessary for lab1
+        // Done
+        // random eviction
+        List<Integer> keys = new ArrayList<>(buffer.keySet());
+        int randomKey = keys.get(new Random().nextInt(keys.size()));
+        PageId evictPid = buffer.get(randomKey).getId();
+        try {
+            flushPage(evictPid);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        discardPage(evictPid);
     }
 
 }
