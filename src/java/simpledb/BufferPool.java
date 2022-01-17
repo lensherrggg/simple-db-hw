@@ -74,10 +74,12 @@ public class BufferPool {
      */
     public  Page getPage(TransactionId tid, PageId pid, Permissions perm)
         throws TransactionAbortedException, DbException {
-        // TODO: evict one page after lab1
         int key = pid.hashCode();
         if (!buffer.containsKey(key)) {
             DbFile dbFile = Database.getCatalog().getDatabaseFile(pid.getTableId());
+            while (buffer.size() >= numPages) {
+                evictPage();
+            }
             Page page = dbFile.readPage(pid);
             buffer.put(key, page);
             return page;
@@ -148,7 +150,7 @@ public class BufferPool {
     public void insertTuple(TransactionId tid, int tableId, Tuple t)
         throws DbException, IOException, TransactionAbortedException {
         // Done
-        ArrayList<Page> pages = Database.getCatalog().getDatabaseFile(t.getRecordId().getPageId().getTableId()).insertTuple(tid, t);
+        ArrayList<Page> pages = Database.getCatalog().getDatabaseFile(tableId).insertTuple(tid, t);
         updateBufferPool(tid, pages);
     }
 
@@ -182,16 +184,17 @@ public class BufferPool {
             // mark dirty
             p.markDirty(true, tid);
             // evict pages
-//            int key = p.getId().hashCode();
-//            if (!this.buffer.containsKey(key)) {
-//                while (this.buffer.size() >= numPages) {
-//                    try {
-//                        evictPage();
-//                    } catch (DbException e) {
-//                        e.printStackTrace();
-//                    }
-//                }
-//            }
+            int key = p.getId().hashCode();
+            if (!this.buffer.containsKey(key)) {
+                while (this.buffer.size() >= numPages) {
+                    try {
+                        evictPage();
+                    } catch (DbException e) {
+                        e.printStackTrace();
+                    }
+                }
+            }
+            this.buffer.put(key, p);
         }
     }
 
