@@ -8,6 +8,7 @@ import java.io.Serializable;
  */
 public interface Aggregator extends Serializable {
     static final int NO_GROUPING = -1;
+    static final Field DUMMY_FIELD = new StringField("__DUMMY_FIELD", 0);
 
     /**
      * SUM_COUNT and SC_AVG will
