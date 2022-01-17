@@ -18,9 +18,7 @@ public class IntegerAggregator implements Aggregator {
     private Type gbFieldType;
     /* aggregate field index */
     private int aField;
-    /* aggregation operator */
-    private Op op;
-    // TODO: aggregation handler
+    /* aggregation handler */
     private AggregateHandler handler;
 
     /**
@@ -43,14 +41,14 @@ public class IntegerAggregator implements Aggregator {
         gbField = gbfield;
         gbFieldType = gbfieldtype;
         aField = afield;
-        op = what;
-        // TODO: set aggregation handler based on operator
         switch (what) {
             case MIN: handler = new MinHandler(); break;
             case MAX: handler = new MaxHandler(); break;
             case SUM: handler = new SumHandler(); break;
             case AVG: handler = new AvgHandler(); break;
             case COUNT: handler = new CountHandler(); break;
+            default:
+                throw new UnsupportedOperationException("Unsupported aggregation operator");
         }
     }
 
@@ -79,7 +77,7 @@ public class IntegerAggregator implements Aggregator {
      *         the constructor.
      */
     public OpIterator iterator() {
-        // some code goes here
+        // Done
         Map<Field, Integer> results = handler.getResults();
         Type[] types;
         String[] names;
