@@ -89,6 +89,7 @@ public class Insert extends Operator {
             }
             count++;
         }
+        called = true;
         Tuple res = new Tuple(RES_TUPLE_DESC);
         res.setField(0, new IntField(count));
         return res;
