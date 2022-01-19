@@ -66,6 +66,13 @@ public class TableStats {
      */
     static final int NUM_HIST_BINS = 100;
 
+    private DbFile file;
+    private int ioCostPerPage;
+    private int nTup;
+    private TupleDesc td;
+    private ConcurrentHashMap<Integer, IntHistogram> intHistogramMap;
+    private ConcurrentHashMap<Integer, StringHistogram> stringHistogramMap;
+
     /**
      * Create a new TableStats object, that keeps track of statistics on each
      * column of a table
@@ -84,7 +91,80 @@ public class TableStats {
         // You should try to do this reasonably efficiently, but you don't
         // necessarily have to (for example) do everything
         // in a single scan of the table.
-        // some code goes here
+        // Done
+        file = Database.getCatalog().getDatabaseFile(tableid);
+        this.ioCostPerPage = ioCostPerPage;
+        nTup = 0;
+
+        // generate a histogram for all fields
+        intHistogramMap = new ConcurrentHashMap<>();
+        stringHistogramMap = new ConcurrentHashMap<>();
+
+        // get some metadata
+        td = file.getTupleDesc();
+        int numFields = td.numFields();
+        int[] minArr = new int[numFields];
+        int[] maxArr = new int[numFields];
+        for (int i = 0; i < numFields; i++) {
+            minArr[i] = Integer.MAX_VALUE;
+            maxArr[i] = Integer.MIN_VALUE;
+        }
+
+        SeqScan scan = new SeqScan(new TransactionId(), tableid);
+        try {
+            scan.open();
+            // scan the whole table to find the min and max of each field
+            while (scan.hasNext()) {
+                Tuple t = scan.next();
+                nTup++;
+                for (int i = 0; i < numFields; i++) {
+                    int fieldVal = t.getField(i).hashCode();
+                    minArr[i] = Math.min(minArr[i], fieldVal);
+                    maxArr[i] = Math.max(maxArr[i], fieldVal);
+                }
+            }
+
+            // initialize histograms
+            for (int i = 0; i < numFields; i++) {
+                Type fieldType = td.getFieldType(i);
+                switch (fieldType) {
+                    case INT_TYPE:
+                        intHistogramMap.put(i, new IntHistogram(NUM_HIST_BINS, minArr[i], maxArr[i]));
+                        break;
+                    case STRING_TYPE:
+                        stringHistogramMap.put(i, new StringHistogram(NUM_HIST_BINS));
+                        break;
+                    default:
+                        throw new UnsupportedOperationException("Unsupported field type");
+                }
+            }
+
+            scan.rewind();
+            // scan the whole table to populate the counts of buckets in each histogram
+            while (scan.hasNext()) {
+                Tuple t = scan.next();
+                for (int i = 0; i < numFields; i++) {
+                    Type fieldType = td.getFieldType(i);
+                    switch (fieldType) {
+                        case INT_TYPE:
+                            IntField intField = (IntField) t.getField(i);
+                            intHistogramMap.get(i).addValue(intField.getValue());
+                            break;
+                        case STRING_TYPE:
+                            StringField stringField = (StringField) t.getField(i);
+                            stringHistogramMap.get(i).addValue(stringField.getValue());
+                            break;
+                        default:
+                            throw new UnsupportedOperationException("Unsupported field type");
+                    }
+                }
+            }
+
+        } catch (DbException | TransactionAbortedException e) {
+            e.printStackTrace();
+        } finally {
+            scan.close();
+        }
     }
 
     /**
@@ -100,8 +180,12 @@ public class TableStats {
      * @return The estimated cost of scanning the table.
      */
     public double estimateScanCost() {
-        // some code goes here
-        return 0;
+        // Done
+        if (file instanceof HeapFile) {
+            HeapFile f = (HeapFile) file;
+            return f.numPages() * ioCostPerPage;
+        }
+        throw new UnsupportedOperationException("Unsupported file type");
     }
 
     /**
@@ -114,8 +198,8 @@ public class TableStats {
      *         selectivityFactor
      */
     public int estimateTableCardinality(double selectivityFactor) {
-        // some code goes here
-        return 0;
+        // Done
+        return (int) (totalTuples() * selectivityFactor);
     }
 
     /**
@@ -129,8 +213,15 @@ public class TableStats {
      * expected selectivity. You may estimate this value from the histograms.
      * */
     public double avgSelectivity(int field, Predicate.Op op) {
-        // some code goes here
-        return 1.0;
+        // Done
+        switch (td.getFieldType(field)) {
+            case INT_TYPE:
+                return intHistogramMap.get(field).avgSelectivity();
+            case STRING_TYPE:
+                return stringHistogramMap.get(field).avgSelectivity();
+            default:
+                throw new UnsupportedOperationException("Unsupported field type");
+        }
     }
 
     /**
@@ -147,16 +238,25 @@ public class TableStats {
      *         predicate
      */
     public double estimateSelectivity(int field, Predicate.Op op, Field constant) {
-        // some code goes here
-        return 1.0;
+        // Done
+        switch (td.getFieldType(field)) {
+            case INT_TYPE:
+                IntField intField = (IntField) constant;
+                return intHistogramMap.get(field).estimateSelectivity(op, intField.getValue());
+            case STRING_TYPE:
+                StringField stringField = (StringField) constant;
+                return stringHistogramMap.get(field).estimateSelectivity(op, stringField.getValue());
+            default:
+                throw new UnsupportedOperationException("Unsupported field type");
+        }
     }
 
     /**
      * return the total number of tuples in this table
      * */
     public int totalTuples() {
-        // some code goes here
-        return 0;
+        // Done
+        return nTup;
     }
 
 }

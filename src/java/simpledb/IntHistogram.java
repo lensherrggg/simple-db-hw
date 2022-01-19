@@ -101,9 +101,9 @@ public class IntHistogram {
      */
     public void addValue(int v) {
     	// Done
-        if (v < minValue || v > maxValue) {
-            throw new IllegalArgumentException("Value out of range");
-        }
+//        if (v < minValue || v > maxValue) {
+//            throw new IllegalArgumentException("Value out of range");
+//        }
         int idx = getBucketIndex(v);
         buckets.get(idx).increase();
         nTup++;
