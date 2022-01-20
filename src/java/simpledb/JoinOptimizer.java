@@ -1,5 +1,7 @@
 package simpledb;
 
+import com.sun.org.apache.xpath.internal.operations.Bool;
+
 import java.util.*;
 
 import javax.swing.*;
@@ -188,25 +190,50 @@ public class JoinOptimizer {
      */
     @SuppressWarnings("unchecked")
     public <T> Set<Set<T>> enumerateSubsets(Vector<T> v, int size) {
-        Set<Set<T>> els = new HashSet<Set<T>>();
-        els.add(new HashSet<T>());
-        // Iterator<Set> it;
-        // long start = System.currentTimeMillis();
+//        Set<Set<T>> els = new HashSet<Set<T>>();
+//        els.add(new HashSet<T>());
+//        // Iterator<Set> it;
+//        // long start = System.currentTimeMillis();
+//
+//        for (int i = 0; i < size; i++) {
+//            Set<Set<T>> newels = new HashSet<Set<T>>();
+//            for (Set<T> s : els) {
+//                for (T t : v) {
+//                    Set<T> news = (Set<T>) (((HashSet<T>) s).clone());
+//                    if (news.add(t))
+//                        newels.add(news);
+//                }
+//            }
+//            els = newels;
+//        }
+//
+//        return els;
+        Set<Set<T>> els = new HashSet<>();
+        Vector<Boolean> used = new Vector<>();
+        for (int i = 0; i < v.size(); i++) {
+            used.add(false);
+        }
+        enumerateSubsetsHelper(els, v, used, 0, 0, size);
+        return els;
+    }
 
-        for (int i = 0; i < size; i++) {
-            Set<Set<T>> newels = new HashSet<Set<T>>();
-            for (Set<T> s : els) {
-                for (T t : v) {
-                    Set<T> news = (Set<T>) (((HashSet<T>) s).clone());
-                    if (news.add(t))
-                        newels.add(news);
+    private <T> void enumerateSubsetsHelper(Set<Set<T>> res, Vector<T> v, Vector<Boolean> used,
+                                            int next, int count, int size) {
+        if (count == size) {
+            Set<T> tmp = new HashSet<>();
+            for (int i = 0; i < v.size(); i++) {
+                if (used.get(i)) {
+                    tmp.add(v.get(i));
                 }
             }
-            els = newels;
+            res.add(tmp);
+            return;
         }
-
-        return els;
-
+        for (int i = next; i < v.size() - (size - count - 1); i++) {
+            used.set(i, true);
+            enumerateSubsetsHelper(res, v, used, i + 1, count + 1, size);
+            used.set(i, false);
+        }
     }
 
     /**
