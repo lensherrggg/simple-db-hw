@@ -111,7 +111,10 @@ public class JoinOptimizer {
             // HINT: You may need to use the variable "j" if you implemented
             // a join algorithm that's more complicated than a basic
             // nested-loops join.
-            return -1.0;
+            // joincost(t1 join t2) = scancost(t1) + ntups(t1) * scancost(t2) // IO cost
+            //                        + ntups(t1) * ntups(t2) // CPU cost
+            // Done
+            return cost1 + card1 * cost2 + card1 * card2;
         }
     }
 
@@ -156,7 +159,20 @@ public class JoinOptimizer {
             boolean t2pkey, Map<String, TableStats> stats,
             Map<String, Integer> tableAliasToId) {
         int card = 1;
-        // some code goes here
+        // Done
+        if (joinOp == Predicate.Op.EQUALS) {
+            if (t1pkey && t2pkey) {
+                card = Math.min(card1, card2);
+            } else if (t1pkey) {
+                card = card2;
+            } else if (t2pkey) {
+                card = card1;
+            } else {
+                card = Math.max(card1, card2);
+            }
+        } else {
+            card = (int) (0.3 * card1 * card2);
+        }
         return card <= 0 ? 1 : card;
     }
 
