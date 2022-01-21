@@ -131,6 +131,9 @@ public class HeapFile implements DbFile {
                 modified.add(page);
                 break;
             }
+            // release full page immediately, although it does not follow 2PL protocol
+            // it is ok since the transaction does not need any data from this page
+            Database.getBufferPool().releasePage(tid, page.getId());
         }
         if (modified.isEmpty()) {
             int newPageNumber = numPages();

@@ -5,6 +5,7 @@ import java.io.*;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
+import java.util.Vector;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -31,6 +32,7 @@ public class BufferPool {
 
     private int numPages;
     private ConcurrentHashMap<Integer, Page> buffer;
+    private LockManager lockManager;
 
     /**
      * Creates a BufferPool that caches up to numPages pages.
@@ -41,6 +43,7 @@ public class BufferPool {
         // Done
         this.numPages = numPages;
         buffer = new ConcurrentHashMap<>();
+        lockManager = new LockManager();
     }
     
     public static int getPageSize() {
@@ -74,6 +77,33 @@ public class BufferPool {
      */
     public  Page getPage(TransactionId tid, PageId pid, Permissions perm)
         throws TransactionAbortedException, DbException {
+        LockType lockType = null;
+        if (perm == Permissions.READ_ONLY) {
+            lockType = LockType.SHARED_LOCK;
+        } else {
+            lockType = LockType.EXCLUSIVE_LOCK;
+        }
+
+        long st = System.currentTimeMillis();
+        boolean acquired = lockManager.acquireLock(pid, tid, lockType);
+        while (!acquired) {
+//            try {
+//                Thread.sleep(10);
+//                acquired = lockManager.acquireLock(pid, tid, lockType);
+//            } catch (InterruptedException e) {
+//                e.printStackTrace();
+//            }
+            acquired = lockManager.acquireLock(pid, tid, lockType);
+        }
+
+        // timeout interruption
+        // if a transaction fails to acquire a lock within limited time, we assume that deadlock exists
+        // abort the transaction
+        long now = System.currentTimeMillis();
+        if (now - st > 500) {
+            throw new TransactionAbortedException();
+        }
+
         int key = pid.hashCode();
         if (!buffer.containsKey(key)) {
             DbFile dbFile = Database.getCatalog().getDatabaseFile(pid.getTableId());
@@ -98,8 +128,8 @@ public class BufferPool {
      * @param pid the ID of the page to unlock
      */
     public  void releasePage(TransactionId tid, PageId pid) {
-        // some code goes here
-        // not necessary for lab1|lab2
+        // Done
+        lockManager.releaseLock(pid, tid);
     }
 
     /**
@@ -114,9 +144,8 @@ public class BufferPool {
 
     /** Return true if the specified transaction has a lock on the specified page */
     public boolean holdsLock(TransactionId tid, PageId p) {
-        // some code goes here
-        // not necessary for lab1|lab2
-        return false;
+        // Done
+        return lockManager.holdsLock(p, tid);
     }
 
     /**
@@ -130,6 +159,10 @@ public class BufferPool {
         throws IOException {
         // some code goes here
         // not necessary for lab1|lab2
+
+        // if commit flush all pages
+        // discard all dirty pages
+        // release lock
     }
 
     /**
@@ -262,4 +295,119 @@ public class BufferPool {
         discardPage(evictPid);
     }
 
+    public enum LockType {
+        SHARED_LOCK, EXCLUSIVE_LOCK;
+    }
+
+    private class Lock {
+        TransactionId tid;
+        LockType lockType;
+
+        public Lock(TransactionId tid, LockType lockType) {
+            this.tid = tid;
+            this.lockType = lockType;
+        }
+    }
+
+    private class LockManager {
+        private ConcurrentHashMap<PageId, Vector<Lock>> pageLocks;
+
+        public LockManager() {
+            pageLocks = new ConcurrentHashMap<>();
+        }
+
+        /**
+         * Try to acquire a given lock
+         * @param pageId the id of page that requires a lock
+         * @param tid the id of transaction that requires a lock
+         * @param lockType the type of lock to be acquired
+         * @return if the acquisition of lock succeeded
+         */
+        public synchronized boolean acquireLock(PageId pageId, TransactionId tid, LockType lockType) {
+            Vector<Lock> locks = pageLocks.get(pageId);
+            if (null == locks) {
+                Lock lock = new Lock(tid, lockType);
+                locks = new Vector<>();
+                locks.add(lock);
+                pageLocks.put(pageId, locks);
+                return true;
+            }
+
+            for (Lock lock : locks) {
+                if (lock.tid == tid) {
+                    if (lock.lockType == lockType) {
+                        // already holds that kind of lock
+                        return true;
+                    }
+                    if (lock.lockType == LockType.EXCLUSIVE_LOCK) {
+                        // already holds an exclusive lock
+                        return true;
+                    }
+                    if (locks.size() == 1) {
+                        // already holds one shared lock, upgrade it to exclusive lock
+                        lock.lockType = LockType.EXCLUSIVE_LOCK;
+                        return true;
+                    }
+                    return false;
+                }
+            }
+
+            if (locks.get(0).lockType == LockType.EXCLUSIVE_LOCK) {
+                // the page already holds an exclusive lock
+                return false;
+            }
+
+            if (lockType == LockType.SHARED_LOCK) {
+                // acquire a new shared lock
+                Lock lock = new Lock(tid, LockType.SHARED_LOCK);
+                locks.add(lock);
+                pageLocks.put(pageId, locks);
+                return true;
+            }
+            // shared locks exist, could not acquire an exclusive lock
+            return false;
+        }
+
+        /**
+         * Release the lock for a transaction
+         * @param tid the transaction whose lock needs to be released
+         * @return if lock is successfully released
+         */
+        public synchronized boolean releaseLock(PageId pageId, TransactionId tid) {
+            Vector<Lock> locks = pageLocks.get(pageId);
+            assert null != locks: "Page is not locked";
+            for (Lock lock : locks) {
+                if (lock.tid == tid) {
+                    locks.remove(lock);
+
+                    if (locks.size() == 0) {
+                        pageLocks.remove(pageId);
+                    }
+
+                    return true;
+                }
+            }
+            // could not find tid that locks on pageId
+            return false;
+        }
+
+        /**
+         * Determine if a transaction holds a lock
+         * @param pageId the id of the page to be checked
+         * @param tid the id of the transaction to be checked
+         * @return if a transaction holds a lock
+         */
+        public synchronized boolean holdsLock(PageId pageId, TransactionId tid) {
+            Vector<Lock> locks = pageLocks.get(pageId);
+            if (null == locks) {
+                return false;
+            }
+            for (Lock lock : locks) {
+                if (lock.tid == tid) {
+                    return true;
+                }
+            }
+            return false;
+        }
+    }
 }
