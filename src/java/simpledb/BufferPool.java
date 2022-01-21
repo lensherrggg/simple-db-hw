@@ -2,10 +2,7 @@ package simpledb;
 
 import java.io.*;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Random;
-import java.util.Vector;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -138,8 +135,8 @@ public class BufferPool {
      * @param tid the ID of the transaction requesting the unlock
      */
     public void transactionComplete(TransactionId tid) throws IOException {
-        // some code goes here
-        // not necessary for lab1|lab2
+        // Done
+        transactionComplete(tid, true);
     }
 
     /** Return true if the specified transaction has a lock on the specified page */
@@ -160,9 +157,14 @@ public class BufferPool {
         // some code goes here
         // not necessary for lab1|lab2
 
-        // if commit flush all pages
-        // discard all dirty pages
+        // if commit flush all pages, else recover
+        if (commit) {
+            flushPages(tid);
+        } else {
+            restorePages(tid);
+        }
         // release lock
+        lockManager.releaseLock(tid);
     }
 
     /**
@@ -275,6 +277,24 @@ public class BufferPool {
     public synchronized  void flushPages(TransactionId tid) throws IOException {
         // some code goes here
         // not necessary for lab1|lab2
+        for (Page page : buffer.values()) {
+            TransactionId pageTid = page.isDirty();
+            if (null != pageTid && pageTid == tid) {
+                flushPage(page.getId());
+            }
+        }
+    }
+
+    /** Restore all pages of a specified transaction from disk
+     */
+    public synchronized void restorePages(TransactionId tid) throws IOException {
+        for (Page page : buffer.values()) {
+            TransactionId pageTid = page.isDirty();
+            if (null != pageTid && pageTid == tid) {
+                // discard the dirty page and retrieve from disk again when needed
+                discardPage(page.getId());
+            }
+        }
     }
 
     /**
@@ -285,8 +305,29 @@ public class BufferPool {
         // Done
         // random eviction
         List<Integer> keys = new ArrayList<>(buffer.keySet());
-        int randomKey = keys.get(new Random().nextInt(keys.size()));
-        PageId evictPid = buffer.get(randomKey).getId();
+        Page pageToEvict = null;
+        Set<PageId> dirtyPageIds = new HashSet<>();
+        boolean foundDirtyPage = false;
+        while (!foundDirtyPage) {
+            int randomKey = keys.get(new Random().nextInt(keys.size()));
+            pageToEvict = buffer.get(randomKey);
+            if (null != pageToEvict.isDirty()) {
+                // dirty page
+                dirtyPageIds.add(pageToEvict.getId());
+                if (dirtyPageIds.size() > numPages) {
+                    break;
+                }
+                continue;
+            }
+            foundDirtyPage = true;
+        }
+
+        if (!foundDirtyPage) {
+            // no clean pages
+            throw new DbException("All pages in buffer pool is dirty");
+        }
+
+        PageId evictPid = pageToEvict.getId();
         try {
             flushPage(evictPid);
         } catch (IOException e) {
@@ -389,6 +430,12 @@ public class BufferPool {
             }
             // could not find tid that locks on pageId
             return false;
+        }
+
+        public synchronized void releaseLock(TransactionId tid) {
+            for (PageId pid : pageLocks.keySet()) {
+                releaseLock(pid, tid);
+            }
         }
 
         /**
