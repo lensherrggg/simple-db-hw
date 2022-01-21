@@ -82,23 +82,17 @@ public class BufferPool {
         }
 
         long st = System.currentTimeMillis();
-        boolean acquired = lockManager.acquireLock(pid, tid, lockType);
-        while (!acquired) {
-//            try {
-//                Thread.sleep(10);
-//                acquired = lockManager.acquireLock(pid, tid, lockType);
-//            } catch (InterruptedException e) {
-//                e.printStackTrace();
-//            }
-            acquired = lockManager.acquireLock(pid, tid, lockType);
-        }
-
-        // timeout interruption
-        // if a transaction fails to acquire a lock within limited time, we assume that deadlock exists
-        // abort the transaction
-        long now = System.currentTimeMillis();
-        if (now - st > 500) {
-            throw new TransactionAbortedException();
+        while (true) {
+            if (lockManager.acquireLock(pid, tid, lockType)) {
+                break;
+            }
+            // timeout interruption
+            // if a transaction fails to acquire a lock within limited time, we assume that deadlock exists
+            // abort the transaction
+            long now = System.currentTimeMillis();
+            if (now - st > 100) {
+                throw new TransactionAbortedException();
+            }
         }
 
         int key = pid.hashCode();
@@ -154,9 +148,7 @@ public class BufferPool {
      */
     public void transactionComplete(TransactionId tid, boolean commit)
         throws IOException {
-        // some code goes here
-        // not necessary for lab1|lab2
-
+        // Done
         // if commit flush all pages, else recover
         if (commit) {
             flushPages(tid);
@@ -275,8 +267,7 @@ public class BufferPool {
     /** Write all pages of the specified transaction to disk.
      */
     public synchronized  void flushPages(TransactionId tid) throws IOException {
-        // some code goes here
-        // not necessary for lab1|lab2
+        // Done
         for (Page page : buffer.values()) {
             TransactionId pageTid = page.isDirty();
             if (null != pageTid && pageTid == tid) {
