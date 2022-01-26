@@ -467,6 +467,45 @@ public class LogFile {
             synchronized(this) {
                 preAppend();
                 // some code goes here
+                Long firstLogRecord = tidToFirstLogRecord.get(tid.getId());
+                if (null == firstLogRecord) {
+                    throw new NoSuchElementException("specified transaction id does not exist");
+                }
+                // move file pointer to the start of the transaction's corresponding record
+                raf.seek(firstLogRecord);
+                Set<PageId> set = new HashSet<>();
+                while (true) {
+                    try {
+                        int type = raf.readInt();
+                        long recordTid = raf.readLong();
+                        switch (type) {
+                            case UPDATE_RECORD:
+                                Page beforeImage = readPageData(raf);
+                                Page afterImage = readPageData(raf);
+                                PageId pid = beforeImage.getId();
+                                if (recordTid == tid.getId() && !set.contains(pid)) {
+                                    set.add(pid);
+                                    Database.getBufferPool().discardPage(pid);
+                                    Database.getCatalog().getDatabaseFile(pid.getTableId()).writePage(beforeImage);
+                                }
+                                break;
+                            case CHECKPOINT_RECORD:
+                                int transactionCnt = raf.readInt();
+                                while (transactionCnt-- > 0) {
+                                    raf.readLong();
+                                    raf.readLong();
+                                }
+                                break;
+                            default:
+                                break;
+                        }
+                        // each log record ends with a long integer file offset
+                        // representing the offset where the record begins
+                        raf.readLong();
+                    } catch (EOFException e) {
+                        break;
+                    }
+                }
             }
         }
     }
