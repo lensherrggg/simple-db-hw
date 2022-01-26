@@ -151,7 +151,17 @@ public class BufferPool {
         // Done
         // if commit flush all pages, else recover
         if (commit) {
-            flushPages(tid);
+//            flushPages(tid);
+            for (Page page : buffer.values()) {
+                TransactionId pageTid = page.isDirty();
+                if (null != pageTid && pageTid == tid) {
+                    flushPage(page.getId());
+                    page.setBeforeImage();
+                }
+                if (null == pageTid) {
+                    page.setBeforeImage();
+                }
+            }
         } else {
             restorePages(tid);
         }
@@ -260,10 +270,8 @@ public class BufferPool {
         if (null != p.isDirty()) {
             DbFile dbFile = Database.getCatalog().getDatabaseFile(p.getId().getTableId());
             TransactionId dirtier = p.isDirty();
-            if (null != dirtier) {
-                Database.getLogFile().logWrite(dirtier, p.getBeforeImage(), p);
-                Database.getLogFile().force();
-            }
+            Database.getLogFile().logWrite(dirtier, p.getBeforeImage(), p);
+            Database.getLogFile().force();
             dbFile.writePage(p);
             p.markDirty(false, null);
         }
@@ -276,8 +284,8 @@ public class BufferPool {
         for (Page page : buffer.values()) {
             TransactionId pageTid = page.isDirty();
             if (null != pageTid && pageTid == tid) {
-                page.setBeforeImage();
                 flushPage(page.getId());
+                page.setBeforeImage();
             }
         }
     }
