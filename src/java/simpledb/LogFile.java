@@ -497,6 +497,7 @@ public class LogFile {
                                 // avoid traverse through each tid and offset, just jump to the end
 //                                long currPtr = raf.getFilePointer();
 //                                raf.seek(currPtr + (long) transactionCnt * 16);
+                                // end of rollback
                                 loopContinues = false;
                                 break;
                             default:
@@ -535,9 +536,9 @@ public class LogFile {
         synchronized (Database.getBufferPool()) {
             synchronized (this) {
                 recoveryUndecided = false;
-                // some code goes here
+                // Done
                 raf.seek(0);
-                Long checkPointLocation = raf.readLong();
+                long checkPointLocation = raf.readLong();
                 Map<Long, List<Page>> dirtyPages = new HashMap<>();
                 Map<PageId, Page> beforePages = new HashMap<>();
 
@@ -558,16 +559,16 @@ public class LogFile {
                     }
 
                     for (Map.Entry<Long, Long> tidToRecordOffset : this.tidToFirstLogRecord.entrySet()) {
-                        Long tid = tidToRecordOffset.getKey();
-                        Long firstLogRecord = tidToRecordOffset.getValue();
+                        long tid = tidToRecordOffset.getKey();
+                        long firstLogRecord = tidToRecordOffset.getValue();
                         raf.seek(firstLogRecord);
-                        try {
-                            while (true) {
-                                Long startOffset = raf.getFilePointer();
-                                Integer type = raf.readInt();
-                                Long recordTid = raf.readLong();
-                                Long recordOffset = -1L;
 
+                        while (true) {
+                            try {
+                                long startOffset = raf.getFilePointer();
+                                int type = raf.readInt();
+                                long recordTid = raf.readLong();
+                                long recordOffset = -1L;
                                 switch (type) {
                                     case BEGIN_RECORD:
                                         recordOffset = raf.readLong();
@@ -576,7 +577,6 @@ public class LogFile {
                                         break;
                                     case ABORT_RECORD:
                                         recordOffset = raf.readLong();
-
                                         for (Page after : dirtyPages.get(recordTid)) {
                                             Page before = beforePages.get(after.getId());
                                             if (before != null) {
@@ -587,7 +587,6 @@ public class LogFile {
                                                 Debug.log("Can not find before image! ERROR");
                                             }
                                         }
-
                                         dirtyPages.remove(recordTid);
                                         this.tidToFirstLogRecord.remove(recordTid);
                                         break;
@@ -611,21 +610,31 @@ public class LogFile {
                                         dirtyPages.computeIfAbsent(recordTid, k -> new ArrayList<>()).add(after);
                                         beforePages.put(before.getId(), before);
                                         break;
+//                                    case CHECKPOINT_RECORD:
+//                                        int numXactions = raf.readInt();
+////                                        while (numXactions-- > 0) {
+////                                            raf.readLong();
+////                                            raf.readLong();
+////                                        }
+////                                        raf.seek(raf.getFilePointer() + (long) 16 * numXactions);
+//                                        recordOffset = raf.readLong();
+//                                        break;
                                     default:
                                         break;
                                 }
+                            } catch (EOFException e) {
+                                break;
                             }
-                        } catch (EOFException e) {
                         }
                     }
                 } else {
-                    try {
-                        while (true) {
-                            Long startOffset = raf.getFilePointer();
-                            Integer type = raf.readInt();
-                            Long record_tid = raf.readLong();
+                    while (true) {
+                        try {
+                            long startOffset = raf.getFilePointer();
+                            int type = raf.readInt();
+                            long record_tid = raf.readLong();
 
-                            Long curOffset = -1L;
+                            long curOffset = -1L;
                             switch (type) {
                                 case BEGIN_RECORD:
                                 case ABORT_RECORD:
@@ -657,8 +666,9 @@ public class LogFile {
                                 default:
                                     Debug.log("Error type record! ");
                             }
+                        } catch (EOFException e) {
+                            break;
                         }
-                    } catch (EOFException e) {
                     }
                 }
             }
