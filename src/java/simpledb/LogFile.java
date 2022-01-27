@@ -473,8 +473,9 @@ public class LogFile {
                 }
                 // move file pointer to the start of the transaction's corresponding record
                 raf.seek(firstLogRecord);
-                boolean loopContinues = true;
-                while (loopContinues) {
+                // stores the original state of the page, the key is page id's hashcode
+                Map<Integer, Page> originalPageMap = new HashMap<>();
+                while (true) {
                     try {
                         int type = raf.readInt();
                         long recordTid = raf.readLong();
@@ -484,21 +485,23 @@ public class LogFile {
                                 Page afterImage = readPageData(raf);
                                 PageId pid = beforeImage.getId();
                                 if (recordTid == tid.getId()) {
-                                    Database.getBufferPool().discardPage(pid);
-                                    Database.getCatalog().getDatabaseFile(pid.getTableId()).writePage(beforeImage);
+                                    int key = pid.hashCode();
+                                    // if map contains the key
+                                    // it means the page's original state is already fetched
+                                    if (!originalPageMap.containsKey(key)) {
+                                        originalPageMap.put(key, beforeImage);
+                                    }
                                 }
                                 break;
                             case CHECKPOINT_RECORD:
-//                                int transactionCnt = raf.readInt();
+                                int transactionCnt = raf.readInt();
 //                                while (transactionCnt-- > 0) {
 //                                    raf.readLong();
 //                                    raf.readLong();
 //                                }
                                 // avoid traverse through each tid and offset, just jump to the end
-//                                long currPtr = raf.getFilePointer();
-//                                raf.seek(currPtr + (long) transactionCnt * 16);
-                                // end of rollback
-                                loopContinues = false;
+                                long currPtr = raf.getFilePointer();
+                                raf.seek(currPtr + (long) transactionCnt * 16);
                                 break;
                             default:
                                 break;
@@ -509,6 +512,13 @@ public class LogFile {
                     } catch (EOFException e) {
                         break;
                     }
+                }
+
+                // reset page to its original state
+                for (Page p : originalPageMap.values()) {
+                    PageId pid = p.getId();
+                    Database.getBufferPool().discardPage(pid);
+                    Database.getCatalog().getDatabaseFile(pid.getTableId()).writePage(p);
                 }
             }
         }
