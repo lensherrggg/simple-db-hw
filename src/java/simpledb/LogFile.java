@@ -636,6 +636,8 @@ public class LogFile {
                         }
                     }
                 } else {
+                    // traverse each actions to find unfinished transactions
+                    // and rollback all of them
                     while (true) {
                         try {
                             long startOffset = raf.getFilePointer();
