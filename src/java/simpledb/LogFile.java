@@ -538,40 +538,76 @@ public class LogFile {
                 recoveryUndecided = false;
                 // Done
                 raf.seek(0);
-                Set<Long> committedId = new HashSet<>();
-                Map<Long, List<Page>> beforePages = new HashMap<>();
-                Map<Long, List<Page>> afterPages = new HashMap<>();
 
                 long checkPoint = raf.readLong();
+                long scanStartOffset = -1L;
+                if (checkPoint != -1L) {
+                    raf.seek(checkPoint);
+                    int cpType = raf.readInt();
+                    assert cpType == CHECKPOINT_RECORD;
+                    raf.readLong();
+                    int numUnfinishedXactions = raf.readInt();
+                    // find the earliest unfinished transaction to avoid scanning from the beginning of log file
+                    for (int i = 0; i < numUnfinishedXactions; i++) {
+                        raf.readLong(); // don't need transaction id
+                        long recordStartOffset = raf.readLong();
+                        if (scanStartOffset < 0) {
+                            scanStartOffset = recordStartOffset;
+                        }
+                        scanStartOffset = Math.min(scanStartOffset, recordStartOffset);
+                    }
+                }
+
+                if (scanStartOffset < 0) {
+                    scanStartOffset = 8;
+                }
+
+                raf.seek(scanStartOffset);
+                // transactions that need undo
+                Set<Long> unfinishedXactions = new HashSet<>();
+                // transactions that need redo
+                Set<Long> finishedXactions = new HashSet<>();
+                // undos
+                Map<Long, List<Page>> beforePages = new HashMap<>();
+                // redos
+                Map<Long, List<Page>> afterPages = new HashMap<>();
 
                 while (true) {
                     try {
                         int type = raf.readInt();
-                        long txId = raf.readLong();
+                        long recordTid = raf.readLong();
+
                         switch (type) {
-                            case UPDATE_RECORD:
-                                Page beforeImage = readPageData(raf);
-                                Page afterImage = readPageData(raf);
-                                List<Page> l1 = beforePages.getOrDefault(txId, new ArrayList<>());
-                                List<Page> l2 = afterPages.getOrDefault(txId, new ArrayList<>());
-                                l1.add(beforeImage);
-                                beforePages.put(txId, l1);
-                                l2.add(afterImage);
-                                afterPages.put(txId, l2);
+                            case BEGIN_RECORD:
+                                unfinishedXactions.add(recordTid);
+                                break;
+                            case ABORT_RECORD:
                                 break;
                             case COMMIT_RECORD:
-                                // only committed transactions could be counted as finished transactions
-                                // for finished transactions, use after image to recover
-                                // for unfinished transactions (aborted and neither aborted nor committed),
-                                // use before image to recover
-                                committedId.add(txId);
+                                // when a transaction commits, it does not need undo
+                                // so add it to redo set and remove it from undo set
+                                unfinishedXactions.remove(recordTid);
+                                finishedXactions.add(recordTid);
+                                break;
+                            case UPDATE_RECORD:
+                                Page before = readPageData(raf);
+                                Page after = readPageData(raf);
+                                // for undos
+                                List<Page> l1 = beforePages.getOrDefault(recordTid, new ArrayList<>());
+                                l1.add(before);
+                                beforePages.put(recordTid, l1);
+                                // for redos
+                                List<Page> l2 = afterPages.getOrDefault(recordTid, new ArrayList<>());
+                                l2.add(after);
+                                afterPages.put(recordTid, l2);
                                 break;
                             case CHECKPOINT_RECORD:
-                                int numTxs = raf.readInt();
-                                raf.seek(raf.getFilePointer() + (long) 16 * numTxs);
+                                int numXactions = raf.readInt();
+                                // jump to the end of this record
+                                raf.seek(raf.getFilePointer() + (long) 16 * numXactions);
                                 break;
                             default:
-                                break;
+                                throw new UnsupportedOperationException("No such log type");
                         }
                         raf.readLong();
                     } catch (EOFException e) {
@@ -579,23 +615,30 @@ public class LogFile {
                     }
                 }
 
-                // for uncommitted transactions, write before image
-                for (long txId : beforePages.keySet()) {
-                    if (!committedId.contains(txId)) {
-                        List<Page> pages = beforePages.get(txId);
-                        for (Page p : pages) {
-                            Database.getCatalog().getDatabaseFile(p.getId().getTableId()).writePage(p);
-                        }
+                // write before image for unfinished transactions
+                // aka undo
+                for (long txId : unfinishedXactions) {
+                    List<Page> pages = beforePages.get(txId);
+                    if (null == pages) {
+                        continue;
+                    }
+                    // undo it in a reversed order
+                    // the first write should be undone at last
+                    for (int i = pages.size() - 1; i >= 0; i--) {
+                        Page p = pages.get(i);
+                        Database.getCatalog().getDatabaseFile(p.getId().getTableId()).writePage(p);
                     }
                 }
 
-                // for committed transactions, write after image
-                for (long txId : committedId) {
-                    if (afterPages.containsKey(txId)) {
-                        List<Page> pages = afterPages.get(txId);
-                        for (Page p : pages) {
-                            Database.getCatalog().getDatabaseFile(p.getId().getTableId()).writePage(p);
-                        }
+                // write after image for finished transactions
+                // aka redo
+                for (long txId : finishedXactions) {
+                    List<Page> pages = afterPages.get(txId);
+                    if (null == pages) {
+                        continue;
+                    }
+                    for (Page p : pages) {
+                        Database.getCatalog().getDatabaseFile(p.getId().getTableId()).writePage(p);
                     }
                 }
             }
