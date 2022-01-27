@@ -543,6 +543,13 @@ public class LogFile {
                 Map<PageId, Page> beforePages = new HashMap<>();
 
                 if (checkPointLocation != -1L) {
+
+                    // this should be two steps
+                    // first step:
+                    // take care of all unfinished transactions before checkpoint
+                    // traverse all the actions, only take care of actions that belongs to the current transaction
+                    // second step:
+                    // undo all the transactions after checkpoint
                     raf.seek(checkPointLocation);
                     int cpType = raf.readInt();
                     long cpTid = raf.readLong();
@@ -565,6 +572,7 @@ public class LogFile {
 
                         while (true) {
                             try {
+                                // don't forget to check if the action belongs to current transaction
                                 long startOffset = raf.getFilePointer();
                                 int type = raf.readInt();
                                 long recordTid = raf.readLong();
@@ -610,15 +618,15 @@ public class LogFile {
                                         dirtyPages.computeIfAbsent(recordTid, k -> new ArrayList<>()).add(after);
                                         beforePages.put(before.getId(), before);
                                         break;
-//                                    case CHECKPOINT_RECORD:
-//                                        int numXactions = raf.readInt();
-////                                        while (numXactions-- > 0) {
-////                                            raf.readLong();
-////                                            raf.readLong();
-////                                        }
-////                                        raf.seek(raf.getFilePointer() + (long) 16 * numXactions);
-//                                        recordOffset = raf.readLong();
-//                                        break;
+                                    case CHECKPOINT_RECORD:
+                                        int numXactions = raf.readInt();
+                                        while (numXactions-- > 0) {
+                                            raf.readLong();
+                                            raf.readLong();
+                                        }
+//                                        raf.seek(raf.getFilePointer() + (long) 16 * numXactions);
+                                        recordOffset = raf.readLong();
+                                        break;
                                     default:
                                         break;
                                 }
