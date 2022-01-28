@@ -4,6 +4,7 @@ import java.io.*;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
 
 /**
  * BufferPool manages the reading and writing of pages into memory from
@@ -29,6 +30,7 @@ public class BufferPool {
 
     private int numPages;
     private ConcurrentHashMap<Integer, Page> buffer;
+    private ConcurrentLinkedQueue<Integer> queue;
     private LockManager lockManager;
 
     /**
@@ -40,6 +42,7 @@ public class BufferPool {
         // Done
         this.numPages = numPages;
         buffer = new ConcurrentHashMap<>();
+        queue = new ConcurrentLinkedQueue<>();
         lockManager = new LockManager();
     }
     
@@ -90,7 +93,7 @@ public class BufferPool {
             // if a transaction fails to acquire a lock within limited time, we assume that deadlock exists
             // abort the transaction
             long now = System.currentTimeMillis();
-            if (now - st > 100) {
+            if (now - st > 200) {
                 throw new TransactionAbortedException();
             }
         }
@@ -103,9 +106,12 @@ public class BufferPool {
             }
             Page page = dbFile.readPage(pid);
             buffer.put(key, page);
+            queue.add(key);
             return page;
         }
 
+        queue.remove(key);
+        queue.add(key);
         return buffer.get(key);
     }
 
@@ -232,6 +238,8 @@ public class BufferPool {
                 }
             }
             this.buffer.put(key, p);
+            queue.remove(key);
+            queue.add(key);
         }
     }
 
@@ -257,7 +265,9 @@ public class BufferPool {
     */
     public synchronized void discardPage(PageId pid) {
         // Done
-        buffer.remove(pid.hashCode());
+        int key = pid.hashCode();
+        buffer.remove(key);
+        queue.remove(key);
     }
 
     /**
@@ -308,18 +318,22 @@ public class BufferPool {
      */
     private synchronized  void evictPage() throws DbException {
         // Done
-        // random eviction
-        List<Integer> keys = new ArrayList<>(buffer.keySet());
+        // LRU
+        int dirtyPageNum = 0;
+        int currentBufferSize = queue.size();
+        if (currentBufferSize == 0) {
+            throw new DbException("evicting empty buffer");
+        }
         Page pageToEvict = null;
-        Set<PageId> dirtyPageIds = new HashSet<>();
         boolean foundDirtyPage = false;
         while (!foundDirtyPage) {
-            int randomKey = keys.get(new Random().nextInt(keys.size()));
-            pageToEvict = buffer.get(randomKey);
+            Integer oldestKey = queue.poll();
+            pageToEvict = buffer.get(oldestKey);
             if (null != pageToEvict.isDirty()) {
                 // dirty page
-                dirtyPageIds.add(pageToEvict.getId());
-                if (dirtyPageIds.size() > numPages) {
+                dirtyPageNum++;
+                queue.add(oldestKey);
+                if (dirtyPageNum >= currentBufferSize) {
                     break;
                 }
                 continue;
